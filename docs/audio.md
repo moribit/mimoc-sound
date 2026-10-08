@@ -1,0 +1,2 @@
+# CoreAudio
+DefaultOutput AudioUnit、mono native float32 44.1kHz client formatを設定。ハードウェアsample rateの変換はAudioUnit。初期化失敗はGUIに表示し、終了時stop/uninitialize/dispose。callback内にはallocation/file/UI/lock/logなし。64コマンド/8192sampleのSPSCリング。command満杯はUI側で再試行、monitor満杯はsampleをdropし計数。callback間隔が前buffer時間の1.5倍を超える場合late callbackとして表示する。これは実機underrunの確定診断ではなく供給遅延の指標。

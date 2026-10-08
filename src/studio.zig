@@ -15,6 +15,8 @@ var morse_active = false;
 var ab_match = false;
 var loop = true;
 var dirty = true;
+var transport_dirty = true;
+var command_sequence: u31 = 0;
 var audio_ok = false;
 var focused: usize = 0;
 var dragging = false;
@@ -68,7 +70,11 @@ fn publishParameters() dsp.Parameters {
     return p;
 }
 fn submit() void {
-    if (dirty and audio.commands.push(.{ .parameters = publishParameters(), .playing = playing, .duration = if (playing and !loop) 22050 else 0, .restart = !morse_active })) dirty = false;
+    if (dirty and audio.commands.push(.{ .parameters = publishParameters(), .playing = playing, .duration = if (playing and !loop) 22050 else 0, .restart = transport_dirty, .loop_pattern = loop })) {
+        command_sequence +%= 1;
+        dirty = false;
+        transport_dirty = false;
+    }
 }
 fn text(r: *ui.mono1.Renderer, x: i16, y: i16, s: []const u8) void {
     ui.font.draw(r, .tiny5x7, x, y, s, true);
@@ -104,10 +110,10 @@ fn paint() void {
     button(&r, 198, 282, 95, "MORSE TEST");
     button(&r, 12, 309, 90, morse_names[morse_choice]);
     var speed_buf: [32]u8 = undefined;
-    button(&r, 110, 309, 45, "WPM-");
-    button(&r, 163, 309, 45, "WPM+");
+    button(&r, 110, 309, 45, "WPM DN");
+    button(&r, 163, 309, 45, "WPM UP");
     text(&r, 218, 315, std.fmt.bufPrint(&speed_buf, "{d} WPM", .{wpm}) catch "?");
-    text(&r, 12, 335, "SPACE PLAY | TAB | ARROWS | ENTER VALUE");
+    text(&r, 12, 335, "SPACE PLAY  M MORSE  TAB  ARROWS");
     text(&r, 12, 354, status);
     var buf: [64]u8 = undefined;
     text(&r, 12, 376, std.fmt.bufPrint(&buf, "LATE {d}  MONITOR DROP {d}", .{ audio.underruns.load(.monotonic), audio.dropped_monitor.load(.monotonic) }) catch "?");
@@ -118,7 +124,7 @@ fn paint() void {
         const s = samples[j];
         r.pixel(@intCast(401 + i), 126 - @as(i16, @intFromFloat(s * 35)), true);
     }
-    text(&r, 400, 180, "ENVELOPE (MODEL)");
+    text(&r, 400, 180, "ENVELOPE MODEL");
     var model: dsp.Engine = .{ .current = parameters, .target = parameters };
     model.key(true);
     for (0..226) |i| {
@@ -136,7 +142,7 @@ fn paint() void {
     }
     text(&r, 400, 268, std.fmt.bufPrint(&buf, "PEAK {d:.3} RMS {d:.3}", .{ peak, @sqrt(sum / 1024) }) catch "?");
     text(&r, 400, 284, std.fmt.bufPrint(&buf, "CLIPS {d}", .{clipped}) catch "?");
-    text(&r, 400, 304, "FFT HANN 0..11 kHz");
+    text(&r, 400, 304, "FFT HANN 0..11 KHZ");
     var ordered: [1024]f32 = undefined;
     for (&ordered, 0..) |*v, i| v.* = samples[(sample_pos + i) % 1024];
     var mags: [512]f32 = undefined;
@@ -151,6 +157,12 @@ fn paint() void {
 }
 export fn mimoc_canvas_tick() void {
     submit();
+    const state = audio.playback_state.load(.acquire);
+    if (playing and !dirty and state >> 1 == command_sequence and state & 1 == 0) {
+        playing = false;
+        morse_active = false;
+        status = "PLAYBACK FINISHED";
+    }
     while (audio.monitor.pop()) |s| {
         samples[sample_pos] = s;
         sample_pos = (sample_pos + 1) % samples.len;
@@ -192,6 +204,7 @@ export fn mimoc_canvas_event(kind: c_int, x: c_int, y: c_int, key: c_int) void {
                 ab_match = false;
                 status = "BASELINE";
             } else if (x < 175) {
+                previous = parameters;
                 if (side_b) {
                     b = parameters;
                     parameters = a;
@@ -238,10 +251,13 @@ export fn mimoc_canvas_event(kind: c_int, x: c_int, y: c_int, key: c_int) void {
         if (y >= 282 and y < 302) {
             if (x < 97) {
                 playing = !playing;
+                status = if (playing) "PLAYING" else "STOPPED";
                 morse_active = false;
+                transport_dirty = true;
                 dirty = true;
             } else if (x < 190) {
                 loop = !loop;
+                if (!morse_active) transport_dirty = true;
                 dirty = true;
             } else if (x < 293) {
                 morseTest();
@@ -267,7 +283,9 @@ export fn mimoc_canvas_event(kind: c_int, x: c_int, y: c_int, key: c_int) void {
         switch (key) {
             32 => {
                 playing = !playing;
+                status = if (playing) "PLAYING" else "STOPPED";
                 morse_active = false;
+                transport_dirty = true;
                 dirty = true;
             },
             260, 259 => focused = (focused + 1) % 6,
@@ -282,6 +300,7 @@ export fn mimoc_canvas_event(kind: c_int, x: c_int, y: c_int, key: c_int) void {
                 edit = .{};
                 editing = true;
             },
+            'm', 'M' => morseTest(),
             'z', 'Z' => {
                 const tmp = parameters;
                 parameters = previous;
@@ -373,9 +392,11 @@ fn morseTest() void {
         status = "AUDIO COMMAND QUEUE FULL";
         return;
     }
+    command_sequence +%= 1;
     playing = true;
     morse_active = true;
     dirty = false;
+    transport_dirty = false;
     status = "MORSE TEST PLAYING";
 }
 pub fn main() void {
@@ -387,4 +408,35 @@ pub fn main() void {
     defer audio.close();
     paint();
     mimoc_canvas_run(&pixels, W, H, "Mo-Bus Tone Studio");
+}
+
+test "GUI numeric, keyboard, slider and undo" {
+    parameters = .{};
+    previous = parameters;
+    focused = 0;
+    playing = false;
+    editing = false;
+    mimoc_canvas_event(3, 0, 0, 257);
+    try std.testing.expectEqual(@as(f32, 451), parameters.frequency_hz);
+    mimoc_canvas_event(3, 0, 0, 'z');
+    try std.testing.expectEqual(@as(f32, 450), parameters.frequency_hz);
+    mimoc_canvas_event(3, 0, 0, 13);
+    for ("600") |ch| mimoc_canvas_event(3, 0, 0, ch);
+    mimoc_canvas_event(3, 0, 0, 13);
+    try std.testing.expectEqual(@as(f32, 600), parameters.frequency_hz);
+    mimoc_canvas_event(0, 145, 80, 0);
+    mimoc_canvas_event(1, 300, 80, 0);
+    mimoc_canvas_event(2, 300, 80, 0);
+    try std.testing.expectEqual(@as(f32, 1200), parameters.frequency_hz);
+    mimoc_canvas_event(3, 0, 0, 'z');
+    try std.testing.expectEqual(@as(f32, 600), parameters.frequency_hz);
+    mimoc_canvas_event(0, 120, 40, 0);
+    try std.testing.expect(side_b);
+    mimoc_canvas_event(0, 120, 40, 0);
+    try std.testing.expect(!side_b);
+    mimoc_canvas_event(3, 0, 0, 32);
+    try std.testing.expect(playing);
+    mimoc_canvas_event(3, 0, 0, 32);
+    try std.testing.expect(!playing);
+    paint();
 }

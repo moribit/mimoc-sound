@@ -6,8 +6,11 @@ pub fn build(b: *std.Build) void {
     const render = b.addExecutable(.{ .name = "tone-render", .root_module = b.createModule(.{ .root_source_file = b.path("src/render.zig"), .target = target, .optimize = optimize, .link_libc = true }) });
     b.installArtifact(render);
     const test_step = b.step("test", "DSP and application tests");
-    inline for (.{ "queue", "morse", "analysis", "preset" }) |name| {
+    inline for (.{ "queue", "morse", "analysis", "preset", "audio", "quality" }) |name| {
         const module = b.createModule(.{ .root_source_file = b.path("src/" ++ name ++ ".zig"), .target = target, .optimize = optimize });
+        if (comptime std.mem.eql(u8, name, "quality")) module.addCSourceFile(.{ .file = b.path("tests/reference_bridge.c"), .flags = &.{"-ffp-contract=off"} });
+        module.link_libc = true;
+        module.addIncludePath(b.path("integration"));
         test_step.dependOn(&b.addRunArtifact(b.addTest(.{ .root_module = module })).step);
     }
     test_step.dependOn(&b.addRunArtifact(b.addTest(.{ .root_module = engine })).step);
@@ -20,6 +23,7 @@ pub fn build(b: *std.Build) void {
         app.root_module.linkFramework("AppKit", .{});
         app.root_module.linkFramework("AudioUnit", .{});
         app.root_module.linkFramework("CoreAudio", .{});
+        test_step.dependOn(&b.addRunArtifact(b.addTest(.{ .root_module = app.root_module })).step);
         b.installArtifact(app);
         const run = b.addRunArtifact(app);
         b.step("run", "Run Tone Studio").dependOn(&run.step);

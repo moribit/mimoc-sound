@@ -1,0 +1,12 @@
+{
+  "sample_rate": 44100,
+  "frames": 44100,
+  "format": "mono signed PCM16 LE",
+  "peak": 0.23438215277565844,
+  "rms": 0.11705502047110505,
+  "clipped_samples": 0,
+  "portable_c_max_error_lsb": 0,
+  "legacy_steady_max_error_lsb": 0,
+  "legacy_full_max_error_lsb": 7340,
+  "legacy_difference": "Legacy one-shot releases before tone end; Studio key release starts at 500ms. Legacy attack denominator N, Studio N-1. Float libm differences allowed up to 3 LSB."
+}

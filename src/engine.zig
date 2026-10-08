@@ -67,7 +67,7 @@ test "baseline, release and bounded long generation" {
     var e: Engine = .{};
     e.key(true);
     var peak: f32 = 0;
-    for (0..441000) |_| {
+    for (0..2646000) |_| {
         const s = e.next();
         try std.testing.expect(std.math.isFinite(s));
         peak = @max(peak, @abs(s));

@@ -1,0 +1,1 @@
+Reference copied verbatim from Mobus_ESP_IDF a0a2cb3902445a3d03507a678d921b4b87d70f7e, components/drivers/audio/include/tone_waveform.hpp. Independent firmware one-shot envelope is intentionally retained.

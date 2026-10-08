@@ -2,6 +2,10 @@ const std = @import("std");
 const dsp = @import("engine.zig");
 pub const Preset = struct { schema_version: u32 = 1, name: []const u8 = "Baseline", parameters: dsp.Parameters = .{} };
 pub fn parse(allocator: std.mem.Allocator, bytes: []const u8) !std.json.Parsed(Preset) {
+    var metadata = try std.json.parseFromSlice(std.json.Value, allocator, bytes, .{});
+    defer metadata.deinit();
+    if (metadata.value != .object) return error.InvalidPreset;
+    inline for (.{ "schema_version", "name", "parameters" }) |key| if (metadata.value.object.get(key) == null) return error.MissingField;
     var result = try std.json.parseFromSlice(Preset, allocator, bytes, .{ .ignore_unknown_fields = false, .allocate = .alloc_always });
     errdefer result.deinit();
     if (result.value.schema_version != 1) return error.UnsupportedSchema;
@@ -26,7 +30,7 @@ test "schema strict values roundtrip" {
     var p = try parse(a, bytes);
     defer p.deinit();
     try std.testing.expectEqual(@as(f32, 450), p.value.parameters.frequency_hz);
-    try std.testing.expectError(error.UnsupportedSchema, parse(a, "{\"schema_version\":2}"));
-    try std.testing.expectError(error.UnknownField, parse(a, "{\"unexpected\":1}"));
-    try std.testing.expectError(error.InvalidParameter, parse(a, "{\"parameters\":{\"frequency_hz\":1500}}"));
+    try std.testing.expectError(error.UnsupportedSchema, parse(a, "{\"schema_version\":2,\"name\":\"x\",\"parameters\":{}}"));
+    try std.testing.expectError(error.UnknownField, parse(a, "{\"schema_version\":1,\"name\":\"x\",\"parameters\":{},\"unexpected\":1}"));
+    try std.testing.expectError(error.InvalidParameter, parse(a, "{\"schema_version\":1,\"name\":\"x\",\"parameters\":{\"frequency_hz\":1500}}"));
 }

@@ -19,6 +19,12 @@ var dragging = false;
 var edit: ui.controls.NumericInput = .{};
 var editing = false;
 var status: []const u8 = "READY";
+var morse_choice: usize = 3;
+var wpm: u32 = 20;
+var custom: [128]u8 = @splat(0);
+var custom_len: usize = 0;
+const morse_names = [_][]const u8{ "SINGLE", "DOT", "DASH", "SOS", "CQ CQ", "CUSTOM" };
+extern fn tone_prompt([*:0]const u8, [*]u8, usize) c_int;
 var samples: [1024]f32 = @splat(0);
 var sample_pos: usize = 0;
 var sample_count: usize = 0;
@@ -79,8 +85,12 @@ fn paint() void {
     button(&r, 12, 282, 85, if (playing) "STOP" else "PLAY");
     button(&r, 105, 282, 85, if (loop) "LOOP ON" else "LOOP OFF");
     button(&r, 198, 282, 95, "MORSE TEST");
-    text(&r, 12, 314, "SPACE PLAY | TAB FOCUS | ARROWS ADJUST");
-    text(&r, 12, 330, "ENTER TYPE VALUE | ESC CANCEL | Z UNDO");
+    button(&r, 12, 309, 90, morse_names[morse_choice]);
+    var speed_buf: [32]u8 = undefined;
+    button(&r, 110, 309, 45, "WPM-");
+    button(&r, 163, 309, 45, "WPM+");
+    text(&r, 218, 315, std.fmt.bufPrint(&speed_buf, "{d} WPM", .{wpm}) catch "?");
+    text(&r, 12, 335, "SPACE PLAY | TAB | ARROWS | ENTER VALUE");
     text(&r, 12, 354, status);
     var buf: [64]u8 = undefined;
     text(&r, 12, 376, std.fmt.bufPrint(&buf, "LATE {d}  MONITOR DROP {d}", .{ audio.underruns.load(.monotonic), audio.dropped_monitor.load(.monotonic) }) catch "?");
@@ -109,6 +119,18 @@ fn paint() void {
     }
     text(&r, 400, 268, std.fmt.bufPrint(&buf, "PEAK {d:.3} RMS {d:.3}", .{ peak, @sqrt(sum / 1024) }) catch "?");
     text(&r, 400, 284, std.fmt.bufPrint(&buf, "CLIPS {d}", .{clipped}) catch "?");
+    text(&r, 400, 304, "FFT HANN 0..11 kHz");
+    var ordered: [1024]f32 = undefined;
+    for (&ordered, 0..) |*v, i| v.* = samples[(sample_pos + i) % 1024];
+    var mags: [512]f32 = undefined;
+    @import("analysis.zig").spectrum(&ordered, &mags);
+    r.rect(.{ .x = 400, .y = 318, .w = 228, .h = 63 }, true);
+    for (0..226) |i| {
+        const magnitude = mags[i * 256 / 226];
+        const db = 20 * @log10(@max(0.0001, magnitude));
+        const h: @TypeOf(@as(i16, 0)) = @intFromFloat(std.math.clamp((db + 80) / 80, 0, 1) * 60);
+        r.vline(@intCast(401 + i), 380 - h, h, true);
+    }
 }
 export fn mimoc_canvas_tick() void {
     submit();
@@ -174,6 +196,19 @@ export fn mimoc_canvas_event(kind: c_int, x: c_int, y: c_int, key: c_int) void {
                 exportWav();
             }
             dirty = true;
+        }
+        if (y >= 309 and y < 329) {
+            if (x < 102) {
+                morse_choice = (morse_choice + 1) % morse_names.len;
+                if (morse_choice == 5) {
+                    const n = tone_prompt("CUSTOM MORSE (A-Z 0-9)", &custom, custom.len);
+                    if (n > 0) custom_len = @intCast(n);
+                }
+            } else if (x < 155) {
+                wpm = @max(5, wpm - 1);
+            } else if (x < 208) {
+                wpm = @min(60, wpm + 1);
+            }
         }
         if (y >= 252 and y < 272 and x < 187) {
             previous = parameters;
@@ -259,7 +294,25 @@ fn exportWav() void {
     status = "SAVED tone.wav";
 }
 fn morseTest() void {
-    status = "MORSE: IMPLEMENTATION PENDING";
+    const m = @import("morse.zig");
+    const pattern = switch (morse_choice) {
+        0 => m.Pattern.single(500),
+        1 => m.Pattern.encode("E", wpm) catch unreachable,
+        2 => m.Pattern.encode("T", wpm) catch unreachable,
+        3 => m.Pattern.encode("SOS", wpm) catch unreachable,
+        4 => m.Pattern.encode("CQ CQ", wpm) catch unreachable,
+        else => m.Pattern.encode(custom[0..custom_len], wpm) catch {
+            status = "INVALID CUSTOM MORSE";
+            return;
+        },
+    };
+    if (!audio.commands.push(.{ .parameters = parameters, .playing = false, .pattern = pattern, .loop_pattern = loop })) {
+        status = "AUDIO COMMAND QUEUE FULL";
+        return;
+    }
+    playing = true;
+    dirty = false;
+    status = "MORSE TEST PLAYING";
 }
 pub fn main() void {
     audio_ok = true;

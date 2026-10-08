@@ -1,13 +1,17 @@
 const std = @import("std");
 const dsp = @import("engine.zig");
 const Queue = @import("queue.zig").Queue;
-pub const Command = struct { parameters: dsp.Parameters, playing: bool, duration: u32 = 0 };
+pub const Command = struct { parameters: dsp.Parameters, playing: bool, duration: u32 = 0, pattern: ?@import("morse.zig").Pattern = null, loop_pattern: bool = false, restart: bool = true };
 pub var commands: Queue(Command, 64) = .{};
 pub var monitor: Queue(f32, 8192) = .{};
 pub var underruns: std.atomic.Value(u32) = .init(0);
 pub var dropped_monitor: std.atomic.Value(u32) = .init(0);
 var engine: dsp.Engine = .{};
 var remaining: u32 = 0;
+var pattern: ?@import("morse.zig").Pattern = null;
+var event_index: usize = 0;
+var event_left: u32 = 0;
+var repeat: bool = false;
 extern fn tone_audio_open() c_int;
 extern fn tone_audio_close() void;
 pub fn open() !void {
@@ -22,10 +26,32 @@ export fn tone_audio_render(output: [*]f32, count: u32, late: c_int) void {
     for (0..64) |_| {
         const c = commands.pop() orelse break;
         engine.configure(c.parameters) catch {};
+        if (!c.restart) continue;
         engine.key(c.playing);
         remaining = c.duration;
+        pattern = c.pattern;
+        event_index = 0;
+        event_left = 0;
+        repeat = c.loop_pattern;
     }
     for (output[0..count]) |*s| {
+        if (pattern) |*p| {
+            if (event_left == 0) {
+                if (event_index == p.len) {
+                    if (repeat) event_index = 0 else {
+                        pattern = null;
+                        engine.key(false);
+                    }
+                }
+                if (pattern != null) {
+                    const event = p.events[event_index];
+                    engine.key(event.down);
+                    event_left = event.frames;
+                    event_index += 1;
+                }
+            }
+            if (event_left > 0) event_left -= 1;
+        }
         if (remaining > 0) {
             remaining -= 1;
             if (remaining == 0) engine.key(false);

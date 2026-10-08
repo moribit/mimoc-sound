@@ -11,7 +11,7 @@ SoftFmの保存IDは互換維持されるが現行render_tone_sampleではSynth 
 ## mimoc-ui
 src/platform/macos/window.m はAppKit、Mono1ページ配置のframebuffer、60Hz tick。固定サイズ、クリック、矢印/Return/Space入力。ドラッグ、文字入力、リサイズは不足。
 Runtimeは固定容量node/animation、整数座標、column/row/stack/clip、focused_idとActionによるフォーカス/状態分離。widgetsにはbutton/toggle/progress/tuner/knob、Slider/NumericInputはない。mono1.Rendererのline/pixel/fontでグラフを実装できる。
-依存はvendor/mimoc-uiの独立Git checkoutで固定する。元リポジトリは書込許可範囲外のため拡張はこのcheckoutでテスト・コミットする。
+依存はvendor/mimoc-uiの独立Git checkoutで固定する (最終revisionはdeps/mimoc-ui.rev)。元リポジトリは書込許可範囲外のため拡張はこのcheckoutでテスト・コミットする。
 
 ## Boundaries
 Tone Engineはstd.mathのみでsample生成。UIが固定容量SPSC command queueに設定をpublishし、CoreAudio callbackがconsumeする。callbackは割当・I/O・lockなし。波形解析用sampleも固定容量SPSCでUIへ送り、FFT/描画はUI threadで実行。音声はAudioUnit DefaultOutputのmono float32、44.1kHz client format (device変換はCoreAudio)。WAVはmono little-endian PCM16。

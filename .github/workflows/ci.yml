@@ -1,0 +1,25 @@
+name: Tone Studio
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  validate:
+    strategy:
+      matrix:
+        os: [macos-14, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore verified mimoc-ui
+        run: python3 tools/bootstrap.py
+      - name: Install official Zig 0.17.0
+        run: python3 tools/install_zig.py >> "$GITHUB_PATH"
+      - run: zig version
+      - run: zig fmt --check build.zig src
+      - run: zig build -Doptimize=ReleaseSafe
+      - run: zig build test -Doptimize=ReleaseSafe
+      - name: mimoc-ui regression and RV32 smoke
+        working-directory: vendor/mimoc-ui
+        run: zig build test check-embedded
+      - name: Independent PCM and firmware export checks
+        run: python3 tools/verify_pcm.py

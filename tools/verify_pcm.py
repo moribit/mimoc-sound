@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 """Independent WAV, legacy firmware and C99 adapter verification; stdlib only."""
-import subprocess, wave, struct, math, json, os
+import subprocess, wave, struct, math, json, os, shutil
 os.environ["ZIG_GLOBAL_CACHE_DIR"]=os.path.abspath(".zig-cache/global")
 from pathlib import Path
-subprocess.run(["rtk","zig","build"],check=True)
-subprocess.run(["rtk","proxy","./zig-out/bin/tone-render"],check=True)
-subprocess.run(["rtk","proxy","c++","-std=c++17","-ffp-contract=off","tools/reference.cpp","-o",".zig-cache/tone-reference"],check=True)
-subprocess.run(["rtk","proxy",".zig-cache/tone-reference"],check=True)
-subprocess.run(["rtk","proxy","cc","-std=c99","-Iintegration","-I.zig-cache","tools/export_smoke.c","-o",".zig-cache/export-smoke"],check=True)
-subprocess.run(["rtk","proxy",".zig-cache/export-smoke"],check=True)
+def run(command,check=True):
+    if shutil.which("rtk"): command=["rtk","proxy"]+command
+    subprocess.run(command,check=check)
+run(["zig","build"],check=True)
+run(["./zig-out/bin/tone-render"],check=True)
+run(["c++","-std=c++17","-ffp-contract=off","tools/reference.cpp","-o",".zig-cache/tone-reference"],check=True)
+run([".zig-cache/tone-reference"],check=True)
+run(["cc","-std=c99","-Iintegration","-I.zig-cache","tools/export_smoke.c","-lm","-o",".zig-cache/export-smoke"],check=True)
+run([".zig-cache/export-smoke"],check=True)
 with wave.open("tone.wav","rb") as w:
     assert (w.getnchannels(),w.getsampwidth(),w.getframerate(),w.getnframes())==(1,2,44100,44100)
     pcm=struct.unpack("<44100h",w.readframes(44100))

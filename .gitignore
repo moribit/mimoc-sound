@@ -2,3 +2,8 @@
 zig-out/
 *.wav
 *.pbm
+.tools/
+tone-studio.bundle
+COMMIT-SHAS.txt
+.DS_Store
+__pycache__/

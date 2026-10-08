@@ -1,0 +1,1 @@
+{"schema_version":1,"name":"Baseline (legacy soft sine)","parameters":{"frequency_hz":450,"harmonic_2":0.025,"harmonic_3":0,"attack_ms":3,"release_ms":4,"gain":0.24,"waveform":"sine"}}

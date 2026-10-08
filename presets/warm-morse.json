@@ -1,0 +1,1 @@
+{"schema_version":1,"name":"Warm Morse","parameters":{"frequency_hz":450,"harmonic_2":0.04,"harmonic_3":0,"attack_ms":12,"release_ms":18,"gain":0.2,"waveform":"sine"}}

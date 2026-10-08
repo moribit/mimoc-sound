@@ -6,7 +6,7 @@ pub fn build(b: *std.Build) void {
     const render = b.addExecutable(.{ .name = "tone-render", .root_module = b.createModule(.{ .root_source_file = b.path("src/render.zig"), .target = target, .optimize = optimize, .link_libc = true }) });
     b.installArtifact(render);
     const test_step = b.step("test", "DSP and application tests");
-    inline for (.{ "queue", "morse", "analysis" }) |name| {
+    inline for (.{ "queue", "morse", "analysis", "preset" }) |name| {
         const module = b.createModule(.{ .root_source_file = b.path("src/" ++ name ++ ".zig"), .target = target, .optimize = optimize });
         test_step.dependOn(&b.addRunArtifact(b.addTest(.{ .root_module = module })).step);
     }

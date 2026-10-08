@@ -11,6 +11,8 @@ var a: dsp.Parameters = .{};
 var b: dsp.Parameters = .{ .harmonic_2 = 0.08, .attack_ms = 12, .release_ms = 18 };
 var side_b = false;
 var playing = false;
+var morse_active = false;
+var ab_match = false;
 var loop = true;
 var dirty = true;
 var audio_ok = false;
@@ -50,8 +52,23 @@ fn rect(index: usize) ui.geometry.Rect {
 fn slider(index: usize) ui.controls.Slider {
     return .{ .min = mins[index], .max = maxs[index], .step = steps[index], .value = value(index) };
 }
+fn publishParameters() dsp.Parameters {
+    var p = parameters;
+    if (ab_match and p.gain > 0) {
+        var e: dsp.Engine = .{ .current = p, .target = p, .envelope = 1, .goal = 1, .length = 0, .down = true, .triangle_mix = if (p.waveform == .triangle) 1 else 0 };
+        e.current.gain = 1;
+        e.target.gain = 1;
+        var sum: f32 = 0;
+        for (0..4096) |_| {
+            const sample = e.next();
+            sum += sample * sample;
+        }
+        p.gain = @min(1, 0.12 / @sqrt(sum / 4096));
+    }
+    return p;
+}
 fn submit() void {
-    if (dirty and audio.commands.push(.{ .parameters = parameters, .playing = playing, .duration = if (playing and !loop) 22050 else 0 })) dirty = false;
+    if (dirty and audio.commands.push(.{ .parameters = publishParameters(), .playing = playing, .duration = if (playing and !loop) 22050 else 0, .restart = !morse_active })) dirty = false;
 }
 fn text(r: *ui.mono1.Renderer, x: i16, y: i16, s: []const u8) void {
     ui.font.draw(r, .tiny5x7, x, y, s, true);
@@ -170,7 +187,9 @@ export fn mimoc_canvas_event(kind: c_int, x: c_int, y: c_int, key: c_int) void {
         if (kind != 0) return;
         if (y >= 32 and y < 52) {
             if (x < 97) {
+                previous = parameters;
                 parameters = .{};
+                ab_match = false;
                 status = "BASELINE";
             } else if (x < 175) {
                 if (side_b) {
@@ -181,7 +200,8 @@ export fn mimoc_canvas_event(kind: c_int, x: c_int, y: c_int, key: c_int) void {
                     parameters = b;
                 }
                 side_b = !side_b;
-                status = "A/B: SAME PLAYBACK, PRESET GAIN";
+                ab_match = true;
+                status = "A/B: RMS MATCH 0.12, SAME TRANSPORT";
             } else if (x < 248) {
                 const tmp = parameters;
                 parameters = previous;
@@ -218,6 +238,7 @@ export fn mimoc_canvas_event(kind: c_int, x: c_int, y: c_int, key: c_int) void {
         if (y >= 282 and y < 302) {
             if (x < 97) {
                 playing = !playing;
+                morse_active = false;
                 dirty = true;
             } else if (x < 190) {
                 loop = !loop;
@@ -246,6 +267,7 @@ export fn mimoc_canvas_event(kind: c_int, x: c_int, y: c_int, key: c_int) void {
         switch (key) {
             32 => {
                 playing = !playing;
+                morse_active = false;
                 dirty = true;
             },
             260, 259 => focused = (focused + 1) % 6,
@@ -270,14 +292,53 @@ export fn mimoc_canvas_event(kind: c_int, x: c_int, y: c_int, key: c_int) void {
         }
     }
 }
+extern fn tone_file_path(c_int, [*:0]const u8, [*]u8, usize) c_int;
 fn savePreset() void {
-    status = "PRESET SAVE: IMPLEMENTATION PENDING";
+    var path: [4096]u8 = undefined;
+    if (tone_file_path(1, "json", &path, path.len) == 0) return;
+    const bytes = @import("preset.zig").serialize(std.heap.page_allocator, .{ .name = "Studio", .parameters = parameters }) catch {
+        status = "INVALID PRESET";
+        return;
+    };
+    defer std.heap.page_allocator.free(bytes);
+    @import("files.zig").write(@ptrCast(&path), bytes) catch {
+        status = "SAVE FAILED";
+        return;
+    };
+    status = "PRESET SAVED";
 }
 fn loadPreset() void {
-    status = "PRESET LOAD: IMPLEMENTATION PENDING";
+    var path: [4096]u8 = undefined;
+    if (tone_file_path(0, "json", &path, path.len) == 0) return;
+    var buffer: [8192]u8 = undefined;
+    const bytes = @import("files.zig").read(@ptrCast(&path), &buffer) catch {
+        status = "LOAD FAILED";
+        return;
+    };
+    var p = @import("preset.zig").parse(std.heap.page_allocator, bytes) catch {
+        status = "INVALID PRESET / SCHEMA";
+        return;
+    };
+    defer p.deinit();
+    previous = parameters;
+    parameters = p.value.parameters;
+    ab_match = false;
+    dirty = true;
+    status = "PRESET LOADED";
 }
 fn exportPreset() void {
-    status = "EXPORT: IMPLEMENTATION PENDING";
+    var path: [4096]u8 = undefined;
+    if (tone_file_path(1, "h", &path, path.len) == 0) return;
+    var buffer: [2048]u8 = undefined;
+    const bytes = @import("preset.zig").header(&buffer, .{ .parameters = parameters }) catch {
+        status = "EXPORT FAILED";
+        return;
+    };
+    @import("files.zig").write(@ptrCast(&path), bytes) catch {
+        status = "EXPORT WRITE FAILED";
+        return;
+    };
+    status = "FIRMWARE HEADER EXPORTED";
 }
 fn exportWav() void {
     var e: dsp.Engine = .{ .current = parameters, .target = parameters };
@@ -287,11 +348,13 @@ fn exportWav() void {
         if (i == 22050) e.key(false);
         s.* = e.pcm();
     }
-    @import("files.zig").wav("tone.wav", &pcm) catch {
+    var path: [4096]u8 = undefined;
+    if (tone_file_path(1, "wav", &path, path.len) == 0) return;
+    @import("files.zig").wav(@ptrCast(&path), &pcm) catch {
         status = "WAV WRITE FAILED";
         return;
     };
-    status = "SAVED tone.wav";
+    status = "WAV EXPORTED";
 }
 fn morseTest() void {
     const m = @import("morse.zig");
@@ -306,11 +369,12 @@ fn morseTest() void {
             return;
         },
     };
-    if (!audio.commands.push(.{ .parameters = parameters, .playing = false, .pattern = pattern, .loop_pattern = loop })) {
+    if (!audio.commands.push(.{ .parameters = publishParameters(), .playing = false, .pattern = pattern, .loop_pattern = loop })) {
         status = "AUDIO COMMAND QUEUE FULL";
         return;
     }
     playing = true;
+    morse_active = true;
     dirty = false;
     status = "MORSE TEST PLAYING";
 }

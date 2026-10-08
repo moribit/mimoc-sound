@@ -7,4 +7,16 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(render);
     const test_step = b.step("test", "DSP and application tests");
     test_step.dependOn(&b.addRunArtifact(b.addTest(.{ .root_module = engine })).step);
+    if (target.result.os.tag == .macos) {
+        const app = b.addExecutable(.{ .name = "tone-studio", .root_module = b.createModule(.{ .root_source_file = b.path("src/studio.zig"), .target = target, .optimize = optimize, .link_libc = true }) });
+        app.root_module.addImport("mimoc_ui", b.createModule(.{ .root_source_file = b.path("vendor/mimoc-ui/src/root.zig"), .target = target, .optimize = optimize }));
+        app.root_module.addCSourceFile(.{ .file = b.path("platform/audio.c"), .flags = &.{} });
+        app.root_module.addCSourceFile(.{ .file = b.path("vendor/mimoc-ui/src/platform/macos/canvas.m"), .flags = &.{"-fobjc-arc"} });
+        app.root_module.linkFramework("AppKit", .{});
+        app.root_module.linkFramework("AudioUnit", .{});
+        app.root_module.linkFramework("CoreAudio", .{});
+        b.installArtifact(app);
+        const run = b.addRunArtifact(app);
+        b.step("run", "Run Tone Studio").dependOn(&run.step);
+    }
 }

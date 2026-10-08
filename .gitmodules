@@ -1,0 +1,3 @@
+[submodule "mimoc-ui"]
+	path = vendor/mimoc-ui
+	url = https://github.com/moribit/mimoc-ui.git
